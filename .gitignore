@@ -12,10 +12,13 @@ output/
 recordings/
 voices/
 .wallie_vts_token
+.wallie_state.json
 profiles/*.memory.json
+install_log.txt
 .mypy_cache/
 .pytest_cache/
 .ruff_cache/
+tests/pytest-cache-files-*/
 .vs/
 *.swp
 *.swo
@@ -26,3 +29,6 @@ trailer/
 claude-design-bundle/
 claude-design-v2/
 .claude/
+
+# Landing page (deployed separately on Netlify)
+site/

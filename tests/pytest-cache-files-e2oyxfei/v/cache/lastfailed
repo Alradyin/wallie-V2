@@ -1,4 +1,0 @@
-{
-  "test_ollama_provider.py::test_strip_trailing_v1": true,
-  "test_memory_store.py::test_log_viewer_rolling_trim": true
-}
