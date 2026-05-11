@@ -58,3 +58,15 @@ class ScreenCapture:
         if self._sct is not None:
             self._sct.close()
             self._sct = None
+
+
+def downscale_jpeg(jpeg_bytes: bytes, max_edge: int = 512, quality: int = 50) -> bytes:
+    """Re-encode JPEG at lower resolution/quality for LLM consumption."""
+    img = Image.open(io.BytesIO(jpeg_bytes))
+    w, h = img.size
+    scale = min(1.0, max_edge / max(w, h))
+    if scale < 1.0:
+        img = img.resize((int(w * scale), int(h * scale)), Image.Resampling.LANCZOS)
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=quality)
+    return buf.getvalue()

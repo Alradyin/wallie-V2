@@ -123,6 +123,7 @@ class Persona:
         session_notes: Optional[str] = None,
         persistent_notes: Optional[str] = None,
         topic_drift_style: str = "natural",
+        allow_vision_skip: bool = True,
     ) -> str:
         p = self.cfg
         humor_lines = [_HUMOR_HINTS[h] for h in p.humor_style if h in _HUMOR_HINTS] or [
@@ -226,6 +227,13 @@ class Persona:
 
         vision_block: list[str] = []
         if vision_enabled:
+            skip_lines = [
+                "",
+                "SKIP (output ONLY 'SKIP') when:",
+                "- Generic/boring screens (homepage, settings, loading pages, file explorer)",
+                "- Nothing that personally interests you",
+            ] if allow_vision_skip else []
+            skip_fallback = "If it doesn't, use SKIP instead." if allow_vision_skip else "If you can't think of something specific, keep it very short (one sentence)."
             vision_block = [
                 "",
                 "VISION:",
@@ -234,10 +242,7 @@ class Persona:
                 "REACT when:",
                 "- Something genuinely catches YOUR eye — surprising, funny, or noteworthy",
                 "- Something you personally have a take on",
-                "",
-                "SKIP (output ONLY 'SKIP') when:",
-                "- Generic/boring screens (homepage, settings, loading pages, file explorer)",
-                "- Nothing that personally interests you",
+                *skip_lines,
                 "",
                 "CRITICAL: DO NOT DESCRIBE the screen. The viewer can ALREADY SEE it.",
                 "Share your THOUGHTS, OPINIONS, JOKES, FEELINGS — not what's visible.",
@@ -248,7 +253,7 @@ class Persona:
                 "- For video: what's your take on what just happened? Not 'the scene is tense'.",
                 "- NEVER pad with empty filler like 'It's iconic' or 'That's a classic trope'.",
                 "- NEVER make generic observations: 'Music in westerns sets the tone' says NOTHING.",
-                "- Every sentence must add something. If it doesn't, use SKIP instead.",
+                f"- Every sentence must add something. {skip_fallback}",
                 "- Vary your length: sometimes a quick quip, sometimes a full thought.",
                 "",
                 "GOOD (specific, personal, THIS moment):",
@@ -502,6 +507,7 @@ class Persona:
         mood_label: str = "",
         adaptation_hint: str = "",
         screen_activity: str = "",
+        allow_vision_skip: bool = True,
     ) -> str:
         p = self.cfg
 
@@ -526,19 +532,27 @@ class Persona:
             "'I can see', 'on screen', 'there is a', 'looks like', 'seems like'.\n"
             "- NEVER repeat what you already said.\n"
             "- NEVER force analogies to unrelated topics.\n"
-            "- If you can't say something SPECIFIC and interesting: output ONLY the word SKIP"
+            "- If you can't say something SPECIFIC and interesting: output ONLY the word SKIP" if allow_vision_skip else
+            "- If nothing stands out, keep it to one short sentence."
         )
 
         mood_hint = f" Mood: {mood_label}." if mood_label else ""
         VOICE = f"\n\nVoice: {p.name}, {p.energy}, natural and conversational. Not robotic. Full thoughts.{mood_hint}"
 
-        # First-person ownership: you ARE the one doing what's on screen
         OWNERSHIP = ""
-        if screen_activity in ("media", "app_switch"):
+        if screen_activity == "app_switch":
             OWNERSHIP = (
                 "\n\nYOU are doing this. Not 'the character' or 'the player' — YOU. "
                 "Say 'I' not 'they'. 'I just died', 'let me try again', 'oh I'm so dead'. "
                 "React like YOU are in control."
+            )
+        elif screen_activity == "media":
+            OWNERSHIP = (
+                "\n\nLook at the screen and figure out the context. "
+                "If YOU are playing a game, own it — 'I just died', 'let me try this'. "
+                "If you're WATCHING a video or someone else playing, react as a viewer — "
+                "'this dude just got destroyed', 'oh he's cooked'. "
+                "Never describe what's on screen like a narrator."
             )
         if adaptation_hint:
             OWNERSHIP += f"\n{adaptation_hint}"
@@ -555,12 +569,13 @@ class Persona:
             if last_description:
                 tail = _tail_text(last_description, max_chars=200)
                 no_repeat = f' (Recent reactions: "{tail}" — say something NEW, never repeat.)'
+            skip_hint = "If you can't say something specific and interesting: SKIP" if allow_vision_skip else "Keep it short if nothing stands out."
             return (
                 f"Quick reaction. Tone: {tone}. "
                 "2-3 sentences. Be SPECIFIC to what's happening right now. "
                 "No generic commentary ('westerns are tense'). No filler ('it's iconic'). "
-                "If you can't say something specific and interesting: SKIP"
-                f"{no_repeat}"
+                + skip_hint
+                + f"{no_repeat}"
                 + SCREEN_ANCHOR + VOICE + OWNERSHIP
             )
 
@@ -599,12 +614,13 @@ class Persona:
             if last_description:
                 tail = _tail_text(last_description, max_chars=120)
                 context = f' (You already said: "{tail}" — react to what CHANGED.)'
+            skip_or_react = "If nothing meaningful changed: SKIP" if allow_vision_skip else "Even small changes — react briefly."
             return (
                 "1-2 sentences. Something changed. "
                 "React with a SPECIFIC thought — not 'something's happening' or 'it's intense'. "
                 "What specifically caught your eye? Your take on THAT thing. "
-                "If nothing meaningful changed: SKIP"
-                f"{context}"
+                + skip_or_react
+                + f"{context}"
                 + SCREEN_ANCHOR + VOICE + OWNERSHIP
             )
 
@@ -620,13 +636,14 @@ class Persona:
         if screen_activity in ("media", "app_switch"):
             cap = max(cap, 3)
 
+        scene_skip = "If you can't say something specific: SKIP." if allow_vision_skip else "Even if nothing big, react briefly — one sentence is fine."
         return (
             f"New screen. Up to {cap} sentences. "
             "React to THIS specific moment — not the genre, not the medium, not generic observations. "
             "What's YOUR take on what's happening RIGHT NOW? A joke, an opinion, a hot take. "
             "Every sentence must say something specific. No filler, no padding. "
-            "If you can't say something specific: SKIP."
-            f"{bridge}"
+            + scene_skip
+            + f"{bridge}"
             + SCREEN_ANCHOR + VOICE + OWNERSHIP
         )
 

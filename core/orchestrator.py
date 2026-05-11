@@ -17,6 +17,7 @@ from core.persona import Persona
 from llm import LLMProvider
 from tts import TTSProvider
 from utils.sentences import SentenceStreamer
+from vision.capture import downscale_jpeg
 
 if TYPE_CHECKING:
     from avatar import VTubeStudioAvatar
@@ -101,6 +102,7 @@ class Orchestrator:
             min_vision_react_interval=self._cfg.vision.min_vision_react_interval_sec,
         )
         self._last_vision_turn_ts: float = 0.0
+        self._consecutive_skips: int = 0
         self._pending_directive: Optional[VisionDirective] = None
         self._last_segment_spoken_ts: float = time.time()
         self._target_silence_sec: float = random.uniform(5.0, 12.0)
@@ -374,9 +376,13 @@ class Orchestrator:
         self._enrich_this_turn = False
         vcfg = self._cfg.vision
         if vcfg.enabled and self._vision_loop is not None:
-            since_last_spoken = time.time() - self._last_segment_spoken_ts
+            now_t = time.time()
+            since_last_spoken = now_t - self._last_segment_spoken_ts
+            since_last_vision = now_t - self._last_vision_turn_ts if self._last_vision_turn_ts > 0 else 9999.0
+            hard_floor = vcfg.min_vision_react_interval_sec * 0.65
             if (
                 since_last_spoken >= self._target_silence_sec
+                and since_last_vision >= hard_floor
                 and self._latest_frame is not None
                 and self._mood.wants_vision_engagement() > 0.3
             ):
@@ -707,6 +713,7 @@ class Orchestrator:
             session_notes=self._conv.session_notes or None,
             persistent_notes=self._memory.summary_for_prompt() if self._memory else None,
             topic_drift_style=self._cfg.topics.drift_style,
+            allow_vision_skip=self._cfg.llm.allow_vision_skip,
         )
         provider_msgs = self._conv.to_provider_messages(system_prompt)
 
@@ -727,7 +734,11 @@ class Orchestrator:
         spoken_parts: list[str] = []
         sentence_q: asyncio.Queue[Optional[str]] = asyncio.Queue(maxsize=8)
 
-        skip_eligible = intent.kind == "vision"
+        skip_eligible = (
+            intent.kind == "vision"
+            and self._cfg.llm.allow_vision_skip
+            and self._consecutive_skips < 3
+        )
         skipped = False
 
         vision_sentence_cap = 0
@@ -765,10 +776,15 @@ class Orchestrator:
                     if skipped or capped:
                         continue
                     for sent in streamer.feed(token):
-                        if not first_seen and skip_eligible and _is_skip_signal(sent):
-                            skipped = True
-                            logger.info("vision: SKIP — frame too boring, no audio for this turn")
-                            break
+                        if not first_seen and _is_skip_signal(sent):
+                            if skip_eligible:
+                                skipped = True
+                                logger.info("vision: SKIP — frame too boring, no audio for this turn")
+                                break
+                            else:
+                                # Model tried to SKIP but not allowed — force react, drop the token.
+                                logger.info("vision: SKIP blocked (consecutive=%d), forcing reaction", self._consecutive_skips)
+                                continue
                         first_seen = True
                         pieces = self._prepare_sentence(sent, allow_repeat=allow_repeat)
                         for piece in pieces:
@@ -783,10 +799,14 @@ class Orchestrator:
                         continue
                 if not skipped and not capped:
                     for sent in streamer.flush():
-                        if not first_seen and skip_eligible and _is_skip_signal(sent):
-                            skipped = True
-                            logger.info("vision: SKIP — frame too boring, no audio for this turn")
-                            break
+                        if not first_seen and _is_skip_signal(sent):
+                            if skip_eligible:
+                                skipped = True
+                                logger.info("vision: SKIP — frame too boring, no audio for this turn")
+                                break
+                            else:
+                                logger.info("vision: SKIP blocked on flush (consecutive=%d)", self._consecutive_skips)
+                                continue
                         first_seen = True
                         pieces = self._prepare_sentence(sent, allow_repeat=allow_repeat)
                         for piece in pieces:
@@ -842,7 +862,14 @@ class Orchestrator:
             raise
 
         full = " ".join(spoken_parts).strip()
-        if full:
+        if intent.kind == "vision" and not full:
+            # SKIP or empty output: update vision timestamp to prevent rapid re-firing.
+            self._last_vision_turn_ts = time.time()
+            self._consecutive_skips += 1
+            logger.debug(f"vision: no output (skipped={skipped}), consecutive skips = {self._consecutive_skips}")
+        elif full:
+            if intent.kind == "vision":
+                self._consecutive_skips = 0  # Reset on successful speech.
             self._conv.add_assistant(full, source=intent.kind)
             self._last_spoken = full
             self._last_intent_kind = intent.kind
@@ -860,8 +887,7 @@ class Orchestrator:
             )
             if intent.kind == "vision":
                 self._scene_memory.record_spoken(full)
-                if not is_fallback_vision:
-                    self._last_vision_turn_ts = time.time()
+                self._last_vision_turn_ts = time.time()
             if intent.kind == "chat" and intent.chat is not None and self._memory:
                 self._memory.log_viewer(
                     username=intent.chat.username,
@@ -985,6 +1011,15 @@ class Orchestrator:
         except Exception as e:
             logger.debug(f"avatar.{method} failed: {e}")
 
+    # ----- image helpers -----
+    def _downscale_for_llm(self, jpeg_bytes: bytes) -> bytes:
+        """Shrink frame for LLM to reduce upload size and processing time."""
+        return downscale_jpeg(
+            jpeg_bytes,
+            max_edge=self._cfg.vision.llm_max_edge_px,
+            quality=self._cfg.vision.llm_jpeg_quality,
+        )
+
     # ----- turn assembly -----
     def _build_user_turn(self, intent: Intent) -> tuple[str, list[ImageBlock], str]:
         if intent.kind == "chat" and intent.chat is not None:
@@ -1021,8 +1056,9 @@ class Orchestrator:
                     mood_label=self._mood.label,
                     adaptation_hint=self._behavior.adaptation_hint(),
                     screen_activity=intent.vision.activity.value,
+                    allow_vision_skip=self._cfg.llm.allow_vision_skip,
                 ),
-                [ImageBlock(data=intent.vision.frame.jpeg, mime="image/jpeg")],
+                [ImageBlock(data=self._downscale_for_llm(intent.vision.frame.jpeg), mime="image/jpeg")],
                 "vision",
             )
         if intent.kind == "outro":

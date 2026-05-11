@@ -114,6 +114,7 @@ class LLMConfig(BaseModel):
     presence_penalty: float = 0.3
     frequency_penalty: float = 0.4
     vision_capable: bool = False
+    allow_vision_skip: bool = True
     ollama_base_url: str = "http://localhost:11434"
     ollama_keep_alive: str = "5m"
 
@@ -138,6 +139,8 @@ class VisionConfig(BaseModel):
     interval_sec: float = 3.0
     min_change_threshold: int = 8
     max_edge_px: int = 768
+    llm_max_edge_px: int = 512
+    llm_jpeg_quality: int = 50
     scene_change_threshold: int = 20
     min_emit_interval_sec: float = 8.0
     max_frame_age_sec: float = 5.0

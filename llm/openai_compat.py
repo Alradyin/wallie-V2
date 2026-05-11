@@ -83,7 +83,10 @@ class OpenAICompatProvider(LLMProvider):
                     blocks.append(
                         {
                             "type": "image_url",
-                            "image_url": {"url": f"data:{mime};base64,{b64}"},
+                            "image_url": {
+                                "url": f"data:{mime};base64,{b64}",
+                                "detail": "low",
+                            },
                         }
                     )
             return {"role": m["role"], "content": blocks}

@@ -42,7 +42,7 @@ const MODEL_OPTIONS = {
     { id: "o3-mini", label: "o3 Mini", vision: false },
   ],
   openrouter: [
-    { id: "anthropic/claude-sonnet-4-5", label: "Claude Sonnet 4.5", vision: true },
+    { id: "anthropic/claude-sonnet-4-6", label: "Claude Sonnet 4.6", vision: true },
     { id: "anthropic/claude-haiku-4-5", label: "Claude Haiku 4.5", vision: true },
     { id: "openai/gpt-4o", label: "GPT-4o", vision: true },
     { id: "openai/gpt-4.1", label: "GPT-4.1", vision: true },
@@ -51,8 +51,8 @@ const MODEL_OPTIONS = {
     { id: "meta-llama/llama-3.3-70b-instruct", label: "Llama 3.3 70B", vision: false },
   ],
   anthropic: [
-    { id: "claude-sonnet-4-5", label: "Claude Sonnet 4.5", vision: true },
-    { id: "claude-opus-4-1", label: "Claude Opus 4.1", vision: true },
+    { id: "claude-sonnet-4-6", label: "Claude Sonnet 4.6", vision: true },
+    { id: "claude-opus-4-6", label: "Claude Opus 4.6", vision: true },
     { id: "claude-haiku-4-5", label: "Claude Haiku 4.5", vision: true },
   ],
   gemini: [
