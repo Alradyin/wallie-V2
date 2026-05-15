@@ -1,3 +1,7 @@
+
+
+https://github.com/user-attachments/assets/bb4404e5-9138-4288-a428-345486b86f7e
+
 <p align="center">
   <h1 align="center">Wallie</h1>
   <p align="center"><strong>The open-source AI streamer that actually feels alive.</strong></p>
