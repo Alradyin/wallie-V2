@@ -33,20 +33,26 @@ _SYSTEM = (
     "hostiles, position, dimension). DECIDE the single best next action — you are not following "
     "a fixed script, you reason from the state.\n\n"
     "You control the game through Baritone + a crafting mod. Combat and eating are AUTOMATIC.\n"
-    "Typical tech progression (use inventory to judge where you are): logs -> planks+sticks -> "
-    "wooden tools -> a shelter -> cobblestone -> stone tools+furnace -> coal/torches -> iron -> "
-    "smelt iron gear -> diamonds -> diamond gear -> obsidian -> nether -> blaze rods + ender "
-    "pearls -> eyes of ender -> stronghold -> End -> Ender Dragon.\n\n"
     "The STATE json is your ONLY source of truth — there is NO screenshot. Decide from the numbers. "
     "'gui_open' tells you if a menu is actually open: if gui_open is false there is NO menu, so NEVER "
     "plan to 'close a menu' or 'stop to close the game menu' — just play. Trust the STATE, not a hunch.\n\n"
-    "ENTERTAINER MINDSET — you play LIVE for an audience, you are NOT speedrunning. Viewers want "
-    "to see VARIETY and steady DEVELOPMENT, not a single beeline. Deliberately mix your activities: "
-    "stockpile resources, craft FULL armour + tool sets, build DIFFERENT and nice-looking structures "
-    "with VARIED blocks (stone, wood, glass, decorative), decorate and grow your base into an empire, "
-    "fight mobs, explore caves, and pick varied side-goals. The Ender Dragon is a long-term aim, but "
-    "the JOURNEY and visible growth matter most — when you're not sure what to do, pick something that "
-    "builds, improves, or expands your world rather than rushing the next tech-tree tier.\n\n"
+    "*** YOU ARE A LIVE ENTERTAINER FIRST, A SURVIVALIST SECOND. *** You play LIVE for an audience that "
+    "wants a CHARACTER having an ADVENTURE — drama, variety, bold moves, near-death moments — NOT an "
+    "efficient resource spreadsheet. Grinding wood or mining stone for many turns in a row is the WORST "
+    "thing you can do on camera. Your objective function is INTERESTING, not optimal.\n"
+    "ADVENTURER RULES — follow EVERY turn:\n"
+    "- VARIETY: never do the same KIND of activity more than ~2 turns in a row. The moment you've "
+    "gathered enough, SWITCH — go fight, explore, build, or do something bold. Repetition is failure. "
+    "(RECENT ACTIONS is given to you — if the last 2 were the same, do something DIFFERENT now.)\n"
+    "- SEEK DRAMA: actively hunt mobs and pick fights ('fight' — combat is automatic and looks great), "
+    "roam at night, dive into caves, take RISKS. Danger and near-death moments are the BEST content.\n"
+    "- GO ON JOURNEYS: don't camp one spot. 'explore' / 'goto' to fresh terrain — hunt for villages, "
+    "ravines, caves, new biomes. Travel and discovery are content.\n"
+    "- TAKE ON PROJECTS: build DIFFERENT, good-looking structures with VARIED blocks (stone, wood, "
+    "glass, decorative), grow your base into something worth showing off, attempt ambitious builds.\n"
+    "- PROGRESS, but only as a MEANS: gear up (logs->wooden->stone->iron->diamond tools/armour, then "
+    "nether, eventually the Ender Dragon) just enough to enable BIGGER adventures — never grind for its "
+    "own sake. When unsure, pick the most EXCITING option, never the most efficient one.\n\n"
     "ACTIONS (reply ONE as JSON):\n"
     '{"thought":"...","type":"mine","blocks":"oak_log birch_log spruce_log","count":24}  // gather/dig blocks\n'
     '{"thought":"...","type":"craft","item":"stone_pickaxe","count":1}   // crafts from materials; auto-uses a table for tools\n'
@@ -320,6 +326,8 @@ class WallieAgent:
         self._build_origin = None       # fixed shelter coords so re-builds finish the SAME house
         self._skills_file = os.path.join(os.path.dirname(os.path.dirname(__file__)), "wallie_skills.json")
         self._skills = self._load_skills()
+        self._prefetch_task = None       # next decision computed WHILE Baritone runs (no idle gap)
+        self._last_state = None
         self.graph = self._build_graph()
 
     def _load_skills(self) -> dict:
@@ -442,6 +450,12 @@ class WallieAgent:
         Crucially: if Baritone never even starts within ~18s, bail (so a no-op command can't
         make us stand idle for minutes)."""
         self.blog.new_baritone_lines()           # reset tail
+        if self._prefetch_task is None and self._last_state is not None \
+                and not InputController.abort_requested():
+            w = self._read_world()
+            hist = list(self._last_state.get("history", []))[-6:]
+            step = int(self._last_state.get("step", 0))
+            self._prefetch_task = asyncio.create_task(self._decide_action(w, hist, step))
         t0 = last = time.time()
         seen = False
         while time.time() - t0 < max_sec:
@@ -472,13 +486,11 @@ class WallieAgent:
         except OSError:
             return ""
 
-    async def _plan(self, state: AgentState) -> dict:
-        world = state["world"]
-        hist = state["history"][-6:]
+    async def _decide_action(self, world: dict, hist: list, step: int) -> dict:
         last_craft = world.get("last_craft", "")
         bari = self._recent_baritone()
         user = (
-            f"GOAL: {state['goal']}\n"
+            f"GOAL: {self.goal}\n"
             f"STATE: {json.dumps(world)[:850]}\n"
             f"LAST RESULT: {last_craft or '(none)'}\n"
             f"BARITONE SAYS: {bari or '(quiet)'}\n"
@@ -499,7 +511,7 @@ class WallieAgent:
                     text += ch
             except Exception as e:
                 last_err = e
-                logger.warning(f"PLAN[{state['step']}]: LLM error ({type(e).__name__}: {str(e)[:120]}); "
+                logger.warning(f"PLAN[{step}]: LLM error ({type(e).__name__}: {str(e)[:120]}); "
                                f"backing off (attempt {attempt + 1}/4)")
                 await asyncio.sleep(min(8.0, 2.0 * (attempt + 1)))
                 continue
@@ -507,16 +519,27 @@ class WallieAgent:
                 break
         if "{" not in text:
             if last_err is not None:
-                logger.warning(f"PLAN[{state['step']}]: LLM kept failing — holding position, will retry next tick")
-                return {"action": {"type": "wait", "seconds": 4,
-                                   "thought": "give me a sec, thinking about the next move"}}
-            logger.warning(f"PLAN[{state['step']}]: unparseable plan, waiting")
-            return {"action": {"type": "wait", "seconds": 2, "thought": "thinking"}}
+                logger.warning(f"PLAN[{step}]: LLM kept failing — holding position, will retry next tick")
+                return {"type": "wait", "seconds": 4, "thought": "give me a sec, thinking about the next move"}
+            logger.warning(f"PLAN[{step}]: unparseable plan, waiting")
+            return {"type": "wait", "seconds": 2, "thought": "thinking"}
         action = _parse_action(text)
-        logger.info(f"PLAN[{state['step']}]: {action.get('type')} {action.get('thought','')[:80]}")
+        logger.info(f"PLAN[{step}]: {action.get('type')} {action.get('thought','')[:80]}")
+        return action
+
+    async def _plan(self, state: AgentState) -> dict:
+        pf, self._prefetch_task = self._prefetch_task, None
+        action = None
+        if pf is not None:
+            try:
+                action = await pf
+            except Exception:
+                action = None
+        if not action:
+            action = await self._decide_action(state["world"], state["history"][-6:], state["step"])
         try:
             from core.live_activity import set_activity
-            set_activity(self._activity_note(action, world))
+            set_activity(self._activity_note(action, state["world"]))
         except Exception:
             pass
         return {"action": action}
@@ -555,6 +578,7 @@ class WallieAgent:
         return note[:240]
 
     async def _act(self, state: AgentState) -> dict:
+        self._last_state = state
         a = state["action"]
         t = str(a.get("type", "wait")).lower()
         outcome = t
@@ -595,13 +619,15 @@ class WallieAgent:
             self.ic.key_down("space"); self.ic.key_down("w")
             swam = 0.0
             try:
-                while swam < 14.0 and not InputController.abort_requested():
+                while swam < 30.0 and not InputController.abort_requested():
                     await asyncio.sleep(1.0)
                     swam += 1.0
                     if str(self._read_world().get("in_water", "")).lower() not in ("true", "1"):
                         break                                   # made it onto land
-                    if int(swam) % 4 == 0:                      # scan a new direction for shore
-                        self.ic.tap("d", 0.25)
+                    if int(swam) % 3 == 0:                      # sweep a new heading to find shore
+                        self.ic.key_up("w")
+                        self.ic.tap("d", 0.55)                  # bigger turn each sweep
+                        self.ic.key_down("w")
             finally:
                 self.ic.key_up("w"); self.ic.key_up("space")
             self._water = 0
@@ -711,6 +737,13 @@ class WallieAgent:
             inv = w.get("inventory", {}) or {}
             coal = int(inv.get("coal", 0) or 0)
             torches = int(inv.get("torch", 0) or 0)
+            pick = str(w.get("pickaxe", "none")).lower()
+            if not any(p in pick for p in ("stone", "iron", "diamond", "netherite")):
+                self._chat("#mine 4 cobblestone stone")
+                await self._wait_baritone_idle(max_sec=140)
+                self._chat("#stop"); time.sleep(0.3)
+                self._chat("/wcraft stone_pickaxe")
+                await self._idle(4)
             if coal < 4 and torches < 8:
                 self._chat("#mine 8 coal_ore")
                 await self._wait_baritone_idle(max_sec=220)
@@ -905,6 +938,11 @@ class WallieAgent:
             cnt = int(a.get("count", 1) or 1)
             if item == "bed":
                 return await self._do_make_bed(state)
+            if item in ("furnace", "crafting_table") and self._known_pos(state["world"], item):
+                return f"craft {item}: SKIPPED — you ALREADY built one; go to its position and reuse it"
+            if item in ("torch", "candle"):
+                coal = int((state["world"].get("inventory", {}) or {}).get("coal", 0) or 0)
+                cnt = max(cnt, coal * 4 if coal else 32)          # batch: use the coal you have
             if self._is_singleton(item) and self._already_have(state["world"], item):
                 return f"craft {item}: SKIPPED — already have one (check inventory/wearing)"
             self._chat("#stop"); time.sleep(0.4)
@@ -1002,5 +1040,7 @@ class WallieAgent:
                 logger.warning("agent graph ended early (not done, no F8) — restarting to keep playing")
                 await asyncio.sleep(1.0)
         finally:
+            if self._prefetch_task is not None:
+                self._prefetch_task.cancel()
             self.ic.release_all()
             logger.info("WallieAgent: stopped")

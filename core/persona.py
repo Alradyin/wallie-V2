@@ -27,7 +27,11 @@ def _lang_directive(code: str) -> str:
 _PROFANITY_RULES = {
     "none": "No profanity, slurs, or crude language at all.",
     "mild": "Mild swearing is allowed when it lands a punchline, never as filler.",
-    "heavy": "Strong language is fine when the joke earns it. Never slurs. Never at viewers.",
+    "heavy": "Swear NATURALLY and OFTEN, like a real streamer who's hyped or pissed off — drop "
+             "f-bombs, 'shit', 'damn', 'hell', 'ass', 'bastard', 'crap' as casual punctuation and "
+             "for emphasis, not only on punchlines. Be crude and raw; it's a core part of your voice, "
+             "so don't hold back or sound clean. HARD limits (never cross): no slurs of any kind "
+             "(racial/homophobic/etc.), and never genuinely demean or attack the viewers.",
 }
 
 _FORMALITY_RULES = {
@@ -689,13 +693,18 @@ class Persona:
             OWNERSHIP += f"\n{adaptation_hint}"
         if activity_note and play_has_screen:
             OWNERSHIP += (
-                f"\n\n*** YOU'RE PLAYING and you CAN SEE the screen right now (image attached). "
-                f"What you're doing (ground truth from the game): {activity_note} ***\n"
-                "React to what you ACTUALLY SEE on screen, grounded in this action — pull a real, "
-                "specific detail from the image (what's in front of you, what just happened, the "
-                "situation you're in) and give your honest take or a dry quip. It's YOUR run: first "
-                "person 'I', never 'the player'/'they'. Don't narrate ('I see a…') — just react like "
-                "you're living it. If the note and the screen disagree, trust your EYES."
+                f"\n\n*** YOU'RE PLAYING — you can see the screen (image attached). The GAME FACTS "
+                f"(the TRUTH for what's happening — your plan plus any REAL threats/state): "
+                f"{activity_note} ***\n"
+                "Ground your line in those FACTS. Use the image only for ATMOSPHERE (the vibe, what's "
+                "around you) — never to GUESS specific game events. HARD RULES you must not break: "
+                "do NOT claim an enemy (creeper/zombie/skeleton/spider) unless the facts say a hostile "
+                "is near — a dark cave is NOT a creeper. Do NOT announce a find or kill ('found "
+                "diamonds', got loot, killed it) unless the facts confirm it — your plan being 'mine "
+                "diamonds' does NOT mean you found any. If you're not SURE something is true, react to "
+                "the grind or the mood instead of inventing an event. It's YOUR run: first person 'I', "
+                "never 'the player'. React like you're living it, don't narrate ('I see a…') — but stay "
+                "TRUE to the facts."
             )
         elif activity_note:
             OWNERSHIP += (
@@ -703,7 +712,8 @@ class Persona:
                 f"{activity_note} ***\n"
                 "Build your line on THIS — it is exactly what's happening right now. You do NOT have a "
                 "clear view of the screen, so do NOT invent specifics you weren't told: no 'desert "
-                "temple', 'vault', 'slime chunk', 'chest', 'village', loot, or biome names unless the "
+                "temple', 'vault', 'slime chunk', 'chest', 'village', loot, biome names, no enemies "
+                "(creeper/zombie/skeleton), and no finds or kills ('found diamonds', 'killed it') unless the "
                 "line above says so. Say what you're DOING and your honest take on it — the plan, how "
                 "it's going, a dry quip, whether it was smart. Concrete and grounded, never vague "
                 "narration. It's YOUR run — first person, never 'the player' or 'they'."
